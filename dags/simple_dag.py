@@ -1,10 +1,8 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.decorators import dag, task
 from airflow.operators.bash import BashOperator
 from airflow.sensors.filesystem import FileSensor
-from airflow.utils.dates import days_ago
 from airflow.models.baseoperator import chain
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 default_args = {
     'retries': 5,
@@ -14,39 +12,29 @@ default_args = {
     'email': 'jovan@mail.com'
 }
 
-def _downloading_data(ti, **kwargs):
-    with open('/tmp/my_file.txt', 'w') as f:
-        f.write('my_data')
-    ti.xcom_push(key='my_key', value=43)
-
-
-def _checking_data(ti):
-    my_xcom = ti.xcom_pull(key='my_key', task_ids=['downloading_data'])
-    print(my_xcom)
-
 
 def _failure(context):
     print('On callback failure')
     print(context)
 
 
-with DAG(
-        dag_id='simple_dag',
-        default_args=default_args,
-        start_date=days_ago(3),
-        schedule_interval="@daily",
-        catchup=False,
-) as dag:
+@dag(
+    schedule_interval="@daily",
+    start_date=datetime(2022, 1, 1),
+    catchup=False,
+    default_args=default_args,
+)
+def simple_dag():
+    @task()
+    def downloading_data():
+        with open('/tmp/my_file.txt', 'w') as f:
+            f.write('my_data')
+        return {"my_key": 43}
 
-    downloading_data = PythonOperator(
-        task_id='downloading_data',
-        python_callable=_downloading_data
-    )
-
-    checking_data = PythonOperator(
-        task_id='checking_data',
-        python_callable=_checking_data
-    )
+    @task()
+    def checking_data(my_keys: dict):
+        my_xcom = my_keys["my_key"]
+        print(my_xcom)
 
     waiting_for_data = FileSensor(
         task_id='waiting_for_data',
@@ -56,8 +44,14 @@ with DAG(
 
     processing_data = BashOperator(
         task_id='processing_data',
-        bash_command='exit 1',
+        bash_command='exit 0',
         on_failure_callback=_failure
     )
 
-    chain(downloading_data, checking_data, waiting_for_data, processing_data)
+    downloaded_data = downloading_data()
+    checked_data = checking_data(downloaded_data)
+
+    chain(downloaded_data, checked_data, waiting_for_data, processing_data)
+
+
+simple_dag = simple_dag()
