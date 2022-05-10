@@ -8,8 +8,11 @@ from airflow.models.baseoperator import chain, cross_downstream
 from datetime import datetime, timedelta
 
 default_args = {
-    'retry': 5,
-    'retry_delay': timedelta(minutes=5)
+    'retries': 5,
+    'retry_delay': timedelta(minutes=5),
+    'email_on_failure': True,
+    'email_on_retry': True,
+    'email': 'jovan@mail.com'
 }
 
 # def _downloading_data(**kwargs):
@@ -27,9 +30,15 @@ def _downloading_data(ti, **kwargs):
     # return 42
     ti.xcom_push(key='my_key', value=43)
 
+
 def _checking_data(ti):
     my_xcom = ti.xcom_pull(key='my_key', task_ids=['downloading_data'])
     print(my_xcom)
+
+
+def _failure(context):
+    print('On callback failure')
+    print(context)
 
 
 with DAG(
@@ -66,7 +75,8 @@ with DAG(
 
     processing_data = BashOperator(
         task_id='processing_data',
-        bash_command='exit 0'
+        bash_command='exit 1',
+        on_failure_callback=_failure
     )
 
     # downloading_data.set_downstream(waiting_for_data)
@@ -79,5 +89,5 @@ with DAG(
 
     # downloading_data >> [waiting_for_data >> processing_data]
 
-    chain(downloading_data, waiting_for_data, checking_data, processing_data)
+    chain(downloading_data, checking_data, waiting_for_data, processing_data)
     # cross_downstream([downloading_data, checking_data], [waiting_for_data, processing_data])
